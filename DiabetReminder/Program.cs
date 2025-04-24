@@ -1,25 +1,58 @@
+using Core.Models;
+using Serilog;
+using System.Reflection;
+using Telegram.Bot;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+builder.Configuration.AddUserSecrets(Assembly.GetExecutingAssembly(), true, true);
+var configuration = builder.Configuration;
 
-builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+// Serilog
+Log.Logger = new LoggerConfiguration()
+    .Enrich.FromLogContext()
+    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3} {Properties:j}] {Message:lj} {NewLine}{Exception}")
+    .WriteTo.File("log_",
+        rollingInterval: RollingInterval.Day, 
+        shared: true, 
+        retainedFileCountLimit: 10,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Properties:j} {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
 
-var app = builder.Build();
+builder.Host.UseSerilog();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Telegram
+var telegramToken = configuration["Telegram:Token"] ?? string.Empty;
+
+if (telegramToken != string.Empty)
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    builder.Services.AddSingleton<ITelegramBotClient, TelegramBotClient>(x =>
+        new TelegramBotClient(telegramToken));
+
+    builder.Services.AddSingleton(new TelegramBotParameters()
+    {
+        ChatId = configuration.GetValue<long>("Telegram:ChatId")
+    });
 }
 
-app.UseHttpsRedirection();
+// Nightscout
+var nightscoutUri = configuration["Nightscout:Uri"] ?? string.Empty;
+var nightscoutApiSecret = configuration["Nightscout:ApiSecret"] ?? string.Empty;
 
-app.UseAuthorization();
+if (nightscoutUri != string.Empty && nightscoutApiSecret != string.Empty)
+{
+    builder.Services.Configure<Services.Nightscout.Models.Parameters>(configuration.GetSection("Nightscout:Parameters"));
 
-app.MapControllers();
+    builder.Services.AddSingleton(x =>
+        new Services.Nightscout.Client(
+            nightscoutApiSecret,
+            nightscoutUri));
+}
 
+// Hosted Services
+if (telegramToken != string.Empty && nightscoutUri != string.Empty)
+    builder.Services.AddHostedService<Services.Nightscout.Worker>();
+
+// App
+var app = builder.Build();
 app.Run();

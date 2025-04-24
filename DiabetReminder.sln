@@ -5,6 +5,10 @@ VisualStudioVersion = 17.11.35312.102
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiabetReminder", "DiabetReminder\DiabetReminder.csproj", "{4FB52292-FD33-4D51-96F5-D3251ADCAC4E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Services", "Services\Services.csproj", "{B392C17B-1486-4B2D-8EFA-882437323186}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Core", "Core\Core.csproj", "{72704CEE-180D-4B4B-86DB-7C78865363B3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +19,14 @@ Global
 		{4FB52292-FD33-4D51-96F5-D3251ADCAC4E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4FB52292-FD33-4D51-96F5-D3251ADCAC4E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4FB52292-FD33-4D51-96F5-D3251ADCAC4E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B392C17B-1486-4B2D-8EFA-882437323186}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B392C17B-1486-4B2D-8EFA-882437323186}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B392C17B-1486-4B2D-8EFA-882437323186}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B392C17B-1486-4B2D-8EFA-882437323186}.Release|Any CPU.Build.0 = Release|Any CPU
+		{72704CEE-180D-4B4B-86DB-7C78865363B3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{72704CEE-180D-4B4B-86DB-7C78865363B3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{72704CEE-180D-4B4B-86DB-7C78865363B3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{72704CEE-180D-4B4B-86DB-7C78865363B3}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
