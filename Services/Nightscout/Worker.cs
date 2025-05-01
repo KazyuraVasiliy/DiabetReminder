@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly;
 using Telegram.Bot;
 
 namespace Services.Nightscout
@@ -36,7 +37,16 @@ namespace Services.Nightscout
 
                 try
                 {
-                    var glucose = await _nightscoutClient.GetCurrentGlucoseAsync(cancellationToken, _logger);
+                    var glucose = new List<Responses.Entry>();
+
+                    await Policy.Handle<Exception>()
+                        .WaitAndRetryAsync(
+                            retryCount: 5,
+                            x => TimeSpan.FromSeconds(5))
+                        .ExecuteAsync(async () =>
+                        {
+                            glucose = await _nightscoutClient.GetCurrentGlucoseAsync(cancellationToken, _logger);
+                        });
 
                     if (glucose.Count == 0)
                         throw new Exception("Сервис доступен, но получить данные о текущем сахаре не удалось");
