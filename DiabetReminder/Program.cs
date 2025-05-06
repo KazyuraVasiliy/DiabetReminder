@@ -49,9 +49,29 @@ if (nightscoutUri != string.Empty && nightscoutApiSecret != string.Empty)
             nightscoutUri));
 }
 
+// RUVDS
+var ruvdsUri = configuration["RUVDS:Uri"] ?? string.Empty;
+var ruvdsToken = configuration["RUVDS:Token"] ?? string.Empty;
+
+if (ruvdsUri != string.Empty && ruvdsToken != string.Empty)
+{
+    builder.Services.Configure<Services.RuVds.Models.Parameters>(configuration.GetSection("RUVDS:Parameters"));
+
+    builder.Services.AddSingleton(x =>
+        new Services.RuVds.Client(
+            ruvdsToken,
+            ruvdsUri));
+}
+
 // Hosted Services
 if (telegramToken != string.Empty && nightscoutUri != string.Empty)
     builder.Services.AddHostedService<Services.Nightscout.Worker>();
+
+if (telegramToken != string.Empty && ruvdsUri != string.Empty)
+    builder.Services.AddHostedService<Services.RuVds.Worker>();
+
+if (!builder.Services.Any(x => x.ServiceType == typeof(IHostedService)))
+    throw new Exception("Ни один сервис не активирован");
 
 // App
 var app = builder.Build();
