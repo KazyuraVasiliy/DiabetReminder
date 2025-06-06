@@ -1,5 +1,6 @@
 ﻿using Core.Models;
 using Core.Services;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -74,7 +75,9 @@ namespace Services.RuVds
                 }
                 catch (Exception exception)
                 {
-                    message = exception.Message;
+                    // Даже на очень редкие запросы срабатывает DDoS-Guard, поэтому ошибка 403 отбрасывается
+                    if (!(exception is RestException restException && restException.HttpStatusCode == StatusCodes.Status403Forbidden))
+                        message = exception.Message;
                 }
 
                 try
@@ -98,6 +101,7 @@ namespace Services.RuVds
             while (!cancellationToken.IsCancellationRequested)
             {
                 var message = string.Empty;
+                var delay = _ruvdsParameters.Delay.Status;
 
                 using var _ = _logger.BeginScope(new Dictionary<string, object>
                 {
@@ -123,7 +127,10 @@ namespace Services.RuVds
                 }
                 catch (Exception exception)
                 {
-                    message = exception.Message;
+                    // Даже на очень редкие запросы срабатывает DDoS-Guard, поэтому ошибка 403 отбрасывается, а задержка увеличивается
+                    if (exception is RestException restException && restException.HttpStatusCode == StatusCodes.Status403Forbidden)
+                        delay *= 5;
+                    else message = exception.Message;
                 }
 
                 try
