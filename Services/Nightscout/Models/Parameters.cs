@@ -5,6 +5,8 @@
         public required Glucose Glucose { get; init; }
 
         public required Delay Delay { get; init; }
+
+        public required Users Users { get; init; }
     }
 
     // Установка required привод к ошибке https://github.com/dotnet/runtime/issues/95006
@@ -28,5 +30,16 @@
         public double Warning { get; init; }
 
         public double Default { get; init; }
+    }
+
+    public class Users
+    {
+        public string[]? Hypoglycemia { get; init; }
+
+        public string[]? Hyperglycemia { get; init; }
+
+        public string[]? HighGlucose { get; init; }
+
+        public string[]? LowGlucose { get; init; }
     }
 }

@@ -12,7 +12,7 @@ namespace Tests.Nightscout
         public static IEnumerable<object[]> TheoryData()
         {
             yield return new object[] { new decimal[] { 5 }, 5, "" };
-            yield return new object[] { new decimal[] { 2 }, 5, "Гипогликемия! Глюкоза: 2" };
+            yield return new object[] { new decimal[] { 2 }, 5, "Гипогликемия! Глюкоза: 2\n@User" };
             yield return new object[] { new decimal[] { 12 }, 5, "Гипергликимия! Глюкоза: 12" };
             yield return new object[] { new decimal[] { 4, 5 }, 5, "Резкое падение! Дельта: -1; Глюкоза: 4" };
             yield return new object[] { new decimal[] { 9, 8 }, 5, "Резкий рост! Дельта: 1; Глюкоза: 9" };
@@ -43,6 +43,10 @@ namespace Tests.Nightscout
                     Default = 60000,
                     Warning = 300000,
                     Error = 600000
+                },
+                Users = new Services.Nightscout.Models.Users()
+                {
+                    Hypoglycemia = ["@User"]
                 }
             };
 

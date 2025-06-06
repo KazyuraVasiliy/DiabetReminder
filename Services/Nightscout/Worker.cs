@@ -65,16 +65,18 @@ namespace Services.Nightscout
                         throw new Exception("Прошло более 10 минут с последнего измерения");
 
                     if (lastEntry.Glucose <= _nightscoutParameters.Glucose.Hypoglycemia)
-                        message = $"Гипогликемия! Глюкоза: {lastEntry.Glucose}";
+                        message = $"Гипогликемия! Глюкоза: {lastEntry.Glucose}\n" + string.Join(", ", _nightscoutParameters.Users.Hypoglycemia ?? Array.Empty<string>());
 
                     else if (lastEntry.Glucose >= _nightscoutParameters.Glucose.Hyperglycemia)
-                        message = $"Гипергликимия! Глюкоза: {lastEntry.Glucose}";
+                        message = $"Гипергликимия! Глюкоза: {lastEntry.Glucose}\n" + string.Join(", ", _nightscoutParameters.Users.Hyperglycemia ?? Array.Empty<string>());
 
                     else if (lastEntry.Glucose <= _nightscoutParameters.Glucose.LowGlucose && delta <= -_nightscoutParameters.Glucose.Delta)
-                        message = $"Резкое падение! Дельта: {delta}; Глюкоза: {lastEntry.Glucose}";
+                        message = $"Резкое падение! Дельта: {delta}; Глюкоза: {lastEntry.Glucose}\n" + string.Join(", ", _nightscoutParameters.Users.LowGlucose ?? Array.Empty<string>());
 
                     else if (lastEntry.Glucose >= _nightscoutParameters.Glucose.HighGlucose && delta >= _nightscoutParameters.Glucose.Delta)
-                        message = $"Резкий рост! Дельта: {delta}; Глюкоза: {lastEntry.Glucose}";
+                        message = $"Резкий рост! Дельта: {delta}; Глюкоза: {lastEntry.Glucose}\n" + string.Join(", ", _nightscoutParameters.Users.HighGlucose ?? Array.Empty<string>());
+
+                    message = message.TrimEnd('\n');
 
                     if (message != string.Empty)
                     {
