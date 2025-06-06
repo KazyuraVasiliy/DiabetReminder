@@ -27,6 +27,7 @@ namespace Services.Nightscout
         protected override async Task ExecuteAsync(CancellationToken cancellationToken)
         {
             var chatId = _telegramBotParameters.ChatId;
+            var coefficient = 0;
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -76,7 +77,13 @@ namespace Services.Nightscout
                         message = $"Резкий рост! Дельта: {delta}; Глюкоза: {lastEntry.Glucose}";
 
                     if (message != string.Empty)
-                        delay = TimeSpan.FromMilliseconds(_nightscoutParameters.Delay.Warning);
+                    {
+                        delay = TimeSpan.FromMilliseconds(_nightscoutParameters.Delay.Warning + _nightscoutParameters.Delay.Warning * 0.5 * coefficient);
+
+                        if (lastEntry.Glucose > _nightscoutParameters.Glucose.LowGlucose)
+                            coefficient++;
+                    }
+                    else coefficient = 0;
                 }
                 catch (Exception exception)
                 {
