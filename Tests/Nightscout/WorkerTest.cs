@@ -47,6 +47,14 @@ namespace Tests.Nightscout
                 Users = new Services.Nightscout.Models.Users()
                 {
                     Hypoglycemia = ["@User"]
+                },
+                Mongo = new Services.Nightscout.Models.Mongo()
+                {
+                    ConnectionString = "mongo",
+                    DatabaseName = "database",
+                    Delay = 60000,
+                    MaxDatabaseSizeMib = 496,
+                    WarningPercent = 80
                 }
             };
 

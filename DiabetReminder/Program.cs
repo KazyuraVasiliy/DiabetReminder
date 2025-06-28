@@ -1,4 +1,5 @@
 using Core.Models;
+using MongoDB.Driver;
 using Serilog;
 using System.Reflection;
 using Telegram.Bot;
@@ -34,6 +35,13 @@ if (telegramToken != string.Empty)
         ChatId = configuration.GetValue<long>("Telegram:ChatId")
     });
 }
+
+// Mongo
+var mongoConnectionString = configuration["Nightscout:Parameters:Mongo:ConnectionString"] ?? string.Empty;
+
+if (mongoConnectionString != string.Empty)
+    builder.Services.AddSingleton<IMongoClient, MongoClient>(x =>
+        new MongoClient(mongoConnectionString));
 
 // Nightscout
 var nightscoutUri = configuration["Nightscout:Uri"] ?? string.Empty;
