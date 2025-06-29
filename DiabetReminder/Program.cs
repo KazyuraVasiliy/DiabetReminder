@@ -10,16 +10,19 @@ builder.Configuration.AddUserSecrets(Assembly.GetExecutingAssembly(), true, true
 var configuration = builder.Configuration;
 
 // Serilog
-Log.Logger = new LoggerConfiguration()
+var logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
-    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3} {Properties:j}] {Message:lj} {NewLine}{Exception}")
+    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3} {Properties:j}] {Message:lj} {NewLine}{Exception}");
+
+if (builder.Environment.EnvironmentName == Environments.Production)
+    logger = logger
     .WriteTo.File("log_",
         rollingInterval: RollingInterval.Day, 
         shared: true, 
         retainedFileCountLimit: 10,
-        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Properties:j} {Message:lj}{NewLine}{Exception}")
-    .CreateLogger();
+            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Properties:j} {Message:lj}{NewLine}{Exception}");
 
+Log.Logger = logger.CreateLogger();
 builder.Host.UseSerilog();
 
 // Telegram
