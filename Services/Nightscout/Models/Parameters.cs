@@ -9,6 +9,10 @@
         public required Users? Users { get; init; }
 
         public required Mongo? Mongo { get; init; }
+
+        public required Google? Google { get; init; }
+
+        public required Battery? Battery { get; init; }
     }
 
     // Установка required привод к ошибке https://github.com/dotnet/runtime/issues/95006
@@ -43,6 +47,10 @@
         public string[]? HighGlucose { get; init; }
 
         public string[]? LowGlucose { get; init; }
+
+        public string[]? Battery { get; init; }
+
+        public string[]? Mongo { get; init; }
     }
 
     public class Mongo
@@ -56,5 +64,21 @@
         public int? WarningPercent { get; init; }
 
         public double Delay { get; init; }
+    }
+
+    public class Google
+    {
+        public string CalendarId { get; init; } = string.Empty;
+
+        public double Delay { get; init; }
+    }
+
+    public class Battery
+    {
+        public string[]? Devices { get; init; }
+
+        public double Delay { get; init; }
+
+        public int WarningPercent { get; init; }
     }
 }

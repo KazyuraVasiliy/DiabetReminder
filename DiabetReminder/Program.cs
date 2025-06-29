@@ -1,7 +1,11 @@
 using Core.Models;
+using Google.Apis.Auth.OAuth2;
+using Google.Apis.Calendar.v3;
+using Google.Apis.Services;
 using MongoDB.Driver;
 using Serilog;
 using System.Reflection;
+using System.Text.Json;
 using Telegram.Bot;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,10 +20,10 @@ var logger = new LoggerConfiguration()
 
 if (builder.Environment.EnvironmentName == Environments.Production)
     logger = logger
-    .WriteTo.File("log_",
-        rollingInterval: RollingInterval.Day, 
-        shared: true, 
-        retainedFileCountLimit: 10,
+        .WriteTo.File("log_",
+            rollingInterval: RollingInterval.Day,
+            shared: true,
+            retainedFileCountLimit: 10,
             outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Properties:j} {Message:lj}{NewLine}{Exception}");
 
 Log.Logger = logger.CreateLogger();
@@ -45,6 +49,28 @@ var mongoConnectionString = configuration["Nightscout:Parameters:Mongo:Connectio
 if (mongoConnectionString != string.Empty)
     builder.Services.AddSingleton<IMongoClient, MongoClient>(x =>
         new MongoClient(mongoConnectionString));
+
+// Google
+var googleCalendarId = configuration["Nightscout:Parameters:Google:CalendarId"] ?? string.Empty;
+
+if (googleCalendarId != string.Empty)
+{
+    builder.Services.AddSingleton<CalendarService>(provider =>
+    {
+        var json = JsonSerializer.Serialize(configuration.GetSection("Google:ServiceAccount")
+            .GetChildren()
+            .ToDictionary(x => x.Key, x => x.Value));
+
+        var credential = GoogleCredential.FromJson(json)
+            .CreateScoped(CalendarService.Scope.Calendar);
+
+        return new CalendarService(new BaseClientService.Initializer()
+        {
+            HttpClientInitializer = credential,
+            ApplicationName = "DiabetReminder"
+        });
+    });
+}
 
 // Nightscout
 var nightscoutUri = configuration["Nightscout:Uri"] ?? string.Empty;

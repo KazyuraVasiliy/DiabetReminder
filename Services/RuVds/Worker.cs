@@ -87,7 +87,7 @@ namespace Services.RuVds
                 }
                 catch (Exception exception)
                 {
-                    _logger.LogError(message, exception);
+                    _logger.LogError(exception, message);
                 }
 
                 await Task.Delay(TimeSpan.FromMilliseconds(_ruvdsParameters.Delay.Paid), cancellationToken);
@@ -140,7 +140,7 @@ namespace Services.RuVds
                 }
                 catch (Exception exception)
                 {
-                    _logger.LogError(message, exception);
+                    _logger.LogError(exception, message);
                 }
 
                 await Task.Delay(TimeSpan.FromMilliseconds(_ruvdsParameters.Delay.Status), cancellationToken);

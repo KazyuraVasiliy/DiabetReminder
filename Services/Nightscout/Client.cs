@@ -51,5 +51,22 @@ namespace Services.Nightscout
 
             return entries!;
         }
+
+        public virtual async Task<DeviceStatus?> GetCurrentDeviceStatusAsync(string device, CancellationToken cancellationToken, ILogger? logger = null)
+        {
+            using var client = new HttpClient();
+
+            client.Timeout = TimeSpan.FromSeconds(5);
+            client.DefaultRequestHeaders.Add("api-secret", _apiSecret);
+
+            var date = DateTimeOffset.Now.AddDays(-1).UtcDateTime;
+
+            HttpResponseMessage? response = await client.GetAsync(_baseUri + $"/devicestatus.json?find[device][$eq]={device}&find[created_at][$gte]={date:yyyy-MM-dd}&count=1", cancellationToken);
+            List<DeviceStatus>? statuses = await ResponseAnalysisAsync<List<DeviceStatus>>(response, cancellationToken, logger);
+
+            return statuses!.Count > 0
+                ? statuses.First()
+                : null;
+        }
     }
 }

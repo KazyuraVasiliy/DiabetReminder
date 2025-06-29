@@ -1,5 +1,7 @@
 ﻿using Core.Models;
 using Core.Services;
+using Google.Apis.Calendar.v3;
+using Google.Apis.Calendar.v3.Data;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -18,8 +20,9 @@ namespace Services.Nightscout
         private readonly TelegramBotParameters _telegramBotParameters;        
         private readonly ILogger<Worker> _logger;
         private readonly IMongoClient? _mongoClient;
+        private readonly CalendarService? _calendarService;
 
-        public Worker(Nightscout.Client nightscoutClient, IOptions<Nightscout.Models.Parameters> nightscoutParameters, ITelegramBotClient telegramBotClient, TelegramBotParameters telegramBotParameters, ILogger<Worker> logger, IMongoClient? mongoClient = null)
+        public Worker(Nightscout.Client nightscoutClient, IOptions<Nightscout.Models.Parameters> nightscoutParameters, ITelegramBotClient telegramBotClient, TelegramBotParameters telegramBotParameters, ILogger<Worker> logger, IMongoClient? mongoClient = null, CalendarService? calendarService = null)
         {
             _nightscoutClient = nightscoutClient;
             _nightscoutParameters = nightscoutParameters.Value;
@@ -27,12 +30,15 @@ namespace Services.Nightscout
             _telegramBotParameters = telegramBotParameters;
             _logger = logger;
             _mongoClient = mongoClient;
+            _calendarService = calendarService;
         }
 
         protected override async Task ExecuteAsync(CancellationToken cancellationToken)
         {
             _ = GlucoseMonitor(cancellationToken);
+            _ = EventCreator(cancellationToken);
             _ = MongoMonitor(cancellationToken);
+            _ = BatteryMonitor(cancellationToken);
 
             await Task.CompletedTask;
         }
@@ -67,7 +73,7 @@ namespace Services.Nightscout
                         });
 
                     if (glucose.Count == 0)
-                        throw new Exception("Сервис доступен, но получить данные о текущем сахаре не удалось");
+                        throw new Exception("Сервис доступен, но получить данные о текущем уровне глюкозы в крови не удалось");
 
                     var delta = glucose.Count == 2
                         ? glucose[0].Glucose - glucose[1].Glucose
@@ -76,10 +82,10 @@ namespace Services.Nightscout
                     var lastEntry = glucose[0];
                     var utcDate = DateTime.UtcNow;
 
-                    var totalMinutesAgo = (utcDate - (lastEntry.CreatedAt ?? lastEntry.DateCreated))?.TotalMinutes ?? double.MaxValue;
+                    var totalMinutesAgo = (utcDate - lastEntry.MeasurementDate)?.TotalMinutes ?? double.MaxValue;
 
                     if (Math.Abs(totalMinutesAgo) > 10)
-                        throw new Exception("Прошло более 10 минут с последнего измерения");
+                        throw new Exception("Прошло более 10 минут с последнего измерения глюкозы");
 
                     if (lastEntry.Glucose <= _nightscoutParameters.Glucose.Hypoglycemia)
                         message = $"Гипогликемия! Глюкоза: {lastEntry.Glucose}\n" + string.Join(", ", _nightscoutParameters.Users?.Hypoglycemia ?? Array.Empty<string>());
@@ -117,7 +123,98 @@ namespace Services.Nightscout
                 }
                 catch (Exception exception)
                 {
-                    _logger.LogError(message, exception);
+                    _logger.LogError(exception, message);
+                }
+
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        private async Task EventCreator(CancellationToken cancellationToken)
+        {
+            var methodName = ReflectionService.GetMethodName();
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                using var _ = _logger.BeginScope(new Dictionary<string, object>
+                {
+                    ["SessionId"] = Guid.NewGuid(),
+                    ["MethodName"] = methodName
+                });
+
+                if (_calendarService == null || _nightscoutParameters.Google == null)
+                {
+                    _logger.LogInformation("CalendarService не инициализирован");
+                    return;
+                }
+
+                var delay = TimeSpan.FromMilliseconds(_nightscoutParameters.Google.Delay);
+
+                try
+                {
+                    var glucose = new List<Responses.Entry>();
+
+                    await Policy.Handle<Exception>()
+                        .WaitAndRetryAsync(
+                            retryCount: 5,
+                            x => TimeSpan.FromSeconds(5))
+                        .ExecuteAsync(async () =>
+                        {
+                            glucose = await _nightscoutClient.GetCurrentGlucoseAsync(cancellationToken, _logger);
+                        });
+
+                    if (glucose.Count == 0)
+                        throw new Exception("Сервис доступен, но получить данные о текущем уровне глюкозы в крови не удалось");
+
+                    var delta = glucose.Count == 2
+                        ? glucose[0].Glucose - glucose[1].Glucose
+                        : 0;
+
+                    var lastEntry = glucose[0];
+                    var utcDate = DateTime.UtcNow;
+
+                    var totalMinutesAgo = (utcDate - lastEntry.MeasurementDate)?.TotalMinutes ?? double.MaxValue;
+
+                    if (Math.Abs(totalMinutesAgo) > 10)
+                        throw new Exception("Прошло более 10 минут с последнего измерения глюкозы");
+
+                    var eventsRequest = _calendarService.Events.List(_nightscoutParameters.Google.CalendarId);
+                    eventsRequest.SingleEvents = true;
+
+                    var events = await eventsRequest.ExecuteAsync();
+                    foreach (var @event in events.Items)
+                        await _calendarService.Events.Delete(_nightscoutParameters.Google.CalendarId, @event.Id).ExecuteAsync();
+
+                    var colorId = Constants.GoogleCalendar.EventColors.Sage;
+
+                    if (lastEntry.Glucose <= _nightscoutParameters.Glucose.Hypoglycemia || lastEntry.Glucose >= _nightscoutParameters.Glucose.Hyperglycemia)
+                        colorId = Constants.GoogleCalendar.EventColors.Tomato;
+
+                    else if (lastEntry.Glucose <= _nightscoutParameters.Glucose.LowGlucose || lastEntry.Glucose >= _nightscoutParameters.Glucose.HighGlucose)
+                        colorId = Constants.GoogleCalendar.EventColors.Banana;
+
+                    var newEvent = new Event
+                    {
+                        Summary = $"Глюкоза {lastEntry.Glucose} Δ {delta}",
+                        Description = $"Значение получено в {DateTime.Now.AddMinutes(-totalMinutesAgo):HH:mm:ss dd.MM.yy}",
+                        ColorId = colorId,
+                        Start = new EventDateTime
+                        {
+                            Date = DateTime.Today.ToString("yyyy-MM-dd"),
+                            TimeZone = TimeZoneInfo.Local.ToString()
+                        },
+                        End = new EventDateTime
+                        {
+                            Date = DateTime.Today.AddDays(1).ToString("yyyy-MM-dd"),
+                            TimeZone = TimeZoneInfo.Local.ToString()
+                        }
+                    };
+
+                    await _calendarService.Events.Insert(newEvent, _nightscoutParameters.Google.CalendarId).ExecuteAsync();
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogError(exception, "Ошибка получения уровня глюкозы");
                 }
 
                 await Task.Delay(delay, cancellationToken);
@@ -174,6 +271,12 @@ namespace Services.Nightscout
 
                     if (usedSpacePercent >= (_nightscoutParameters.Mongo.WarningPercent ?? 80))
                         message = $"Размер базы данных превысил допустимое значение: {totalSizeMiB:N2}/{maxDatabaseSizeMib:N2}. Рекомендуется воспользоваться штатным механизмом Nightscout для очистки базы";
+
+                    if (message != string.Empty)
+                    {
+                        message += "\n" + string.Join(", ", _nightscoutParameters.Users?.Mongo ?? Array.Empty<string>());
+                        message = message.TrimEnd('\n');
+                    }
                 }
                 catch (Exception exception)
                 {
@@ -187,7 +290,89 @@ namespace Services.Nightscout
                 }
                 catch (Exception exception)
                 {
-                    _logger.LogError(message, exception);
+                    _logger.LogError(exception, message);
+                }
+
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        private async Task BatteryMonitor(CancellationToken cancellationToken)
+        {
+            var methodName = ReflectionService.GetMethodName();
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                using var _ = _logger.BeginScope(new Dictionary<string, object>
+                {
+                    ["SessionId"] = Guid.NewGuid(),
+                    ["MethodName"] = methodName
+                });
+
+                if ((_nightscoutParameters.Battery?.Devices?.Count() ?? 0) == 0)
+                {
+                    _logger.LogInformation("Не указано ни одного устройства для мониторинга батареи");
+                    return;
+                }
+
+                var delay = TimeSpan.FromMilliseconds(_nightscoutParameters.Battery!.Delay);
+
+                foreach (var device in _nightscoutParameters.Battery!.Devices!)
+                {
+                    var message = string.Empty;
+                    Responses.DeviceStatus? deviceStatus = null;
+
+                    try
+                    {
+                        await Policy.Handle<Exception>()
+                            .WaitAndRetryAsync(
+                                retryCount: 5,
+                                x => TimeSpan.FromSeconds(5))
+                            .ExecuteAsync(async () =>
+                            {
+                                deviceStatus = await _nightscoutClient.GetCurrentDeviceStatusAsync(device, cancellationToken, _logger);
+                            });
+
+                        if (deviceStatus == null)
+                            throw new Exception($"Сервис доступен, но получить данные о текущем уровне заряда {device} не удалось");
+
+                        var deviceName = deviceStatus.Pump != null
+                            ? "Pump"
+                            : device;
+
+                        var utcDate = DateTime.UtcNow;
+                        var totalMinutesAgo = (utcDate - deviceStatus.CreatedAt).TotalMinutes;
+
+                        if (Math.Abs(totalMinutesAgo) > 30)
+                            throw new Exception($"Прошло более 30 минут с последнего измерения заряда батареи {deviceName}");
+
+                        var battery = deviceStatus.Pump != null
+                            ? deviceStatus.Pump.Battery.Percent
+                            : deviceStatus.Uploader.Battery;
+
+                        if (battery <= _nightscoutParameters.Battery!.WarningPercent)
+                            message = $"Низкий уровень заряда {deviceName}! Уровень заряда: {battery}%";
+
+                        if (message != string.Empty)
+                        {
+                            message += "\n" + string.Join(", ", _nightscoutParameters.Users?.Battery ?? Array.Empty<string>());
+                            message = message.TrimEnd('\n');
+                        } 
+                    }
+                    catch (Exception exception)
+                    {
+                        message = $"Ошибка получения уровня заряда {device}! {exception.Message}";
+                    }
+
+                    try
+                    {
+                        if (message != string.Empty)
+                            await _telegramBotClient.SendMessage(_telegramBotParameters.ChatId, message, cancellationToken: cancellationToken);
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger.LogError(exception, message);
+                    }
                 }
 
                 await Task.Delay(delay, cancellationToken);

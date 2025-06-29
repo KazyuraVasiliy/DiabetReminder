@@ -27,5 +27,11 @@ namespace Services.Nightscout.Responses
         /// </summary>
         [JsonPropertyName("dateString")]
         public DateTimeOffset? DateCreated { get; set; }
+
+        /// <summary>
+        /// Дата измерения (на основании CreatedAt и DateCreated)
+        /// </summary>
+        public DateTimeOffset? MeasurementDate =>
+            CreatedAt ?? DateCreated;
     }
 }
