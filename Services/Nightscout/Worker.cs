@@ -1,5 +1,7 @@
 ﻿using Core.Models;
 using Core.Services;
+using Google.Apis.Calendar.v3;
+using Google.Apis.Calendar.v3.Data;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -18,8 +20,9 @@ namespace Services.Nightscout
         private readonly TelegramBotParameters _telegramBotParameters;        
         private readonly ILogger<Worker> _logger;
         private readonly IMongoClient? _mongoClient;
+        private readonly CalendarService? _calendarService;
 
-        public Worker(Nightscout.Client nightscoutClient, IOptions<Nightscout.Models.Parameters> nightscoutParameters, ITelegramBotClient telegramBotClient, TelegramBotParameters telegramBotParameters, ILogger<Worker> logger, IMongoClient? mongoClient = null)
+        public Worker(Nightscout.Client nightscoutClient, IOptions<Nightscout.Models.Parameters> nightscoutParameters, ITelegramBotClient telegramBotClient, TelegramBotParameters telegramBotParameters, ILogger<Worker> logger, IMongoClient? mongoClient = null, CalendarService? calendarService = null)
         {
             _nightscoutClient = nightscoutClient;
             _nightscoutParameters = nightscoutParameters.Value;
@@ -27,6 +30,7 @@ namespace Services.Nightscout
             _telegramBotParameters = telegramBotParameters;
             _logger = logger;
             _mongoClient = mongoClient;
+            _calendarService = calendarService;
         }
 
         protected override async Task ExecuteAsync(CancellationToken cancellationToken)
@@ -80,6 +84,31 @@ namespace Services.Nightscout
 
                     if (Math.Abs(totalMinutesAgo) > 10)
                         throw new Exception("Прошло более 10 минут с последнего измерения");
+
+                    if (_calendarService != null && _nightscoutParameters.Google != null)
+                    {
+                        var events = await _calendarService.Events.List(_nightscoutParameters.Google.CalendarId).ExecuteAsync();
+                        foreach (var @event in events.Items)
+                            await _calendarService.Events.Delete(_nightscoutParameters.Google.CalendarId, @event.Id).ExecuteAsync();
+
+                        var newEvent = new Event
+                        {
+                            Summary = $"Глюкоза {lastEntry.Glucose} Δ {delta}",
+                            Description = $"Значение получено {(int)totalMinutesAgo} мин. назад",
+                            Start = new EventDateTime
+                            {
+                                Date = DateTime.Today.ToString("yyyy-MM-dd"),
+                                TimeZone = TimeZoneInfo.Local.ToString()
+                            },
+                            End = new EventDateTime
+                            {
+                                Date = DateTime.Today.AddDays(1).ToString("yyyy-MM-dd"),
+                                TimeZone = TimeZoneInfo.Local.ToString()
+                            }
+                        };
+
+                        await _calendarService.Events.Insert(newEvent, _nightscoutParameters.Google.CalendarId).ExecuteAsync();
+                    }
 
                     if (lastEntry.Glucose <= _nightscoutParameters.Glucose.Hypoglycemia)
                         message = $"Гипогликемия! Глюкоза: {lastEntry.Glucose}\n" + string.Join(", ", _nightscoutParameters.Users?.Hypoglycemia ?? Array.Empty<string>());

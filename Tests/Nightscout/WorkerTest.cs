@@ -55,6 +55,10 @@ namespace Tests.Nightscout
                     Delay = 60000,
                     MaxDatabaseSizeMib = 496,
                     WarningPercent = 80
+                },
+                Google = new Services.Nightscout.Models.Google()
+                {
+                    CalendarId = "calendarId"
                 }
             };
 

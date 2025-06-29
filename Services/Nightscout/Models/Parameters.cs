@@ -9,6 +9,8 @@
         public required Users? Users { get; init; }
 
         public required Mongo? Mongo { get; init; }
+
+        public required Google? Google { get; init; }
     }
 
     // Установка required привод к ошибке https://github.com/dotnet/runtime/issues/95006
@@ -56,5 +58,10 @@
         public int? WarningPercent { get; init; }
 
         public double Delay { get; init; }
+    }
+
+    public class Google
+    {
+        public string CalendarId { get; init; } = string.Empty;
     }
 }
