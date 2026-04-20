@@ -1,9 +1,11 @@
 using Core.Models;
+using Core.Services;
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Calendar.v3;
 using Google.Apis.Services;
 using MongoDB.Driver;
 using Serilog;
+using Services.Message;
 using System.Reflection;
 using System.Text.Json;
 using Telegram.Bot;
@@ -29,18 +31,28 @@ if (builder.Environment.EnvironmentName == Environments.Production)
 Log.Logger = logger.CreateLogger();
 builder.Host.UseSerilog();
 
+// Message
+builder.Services.AddSingleton<IMessageQueue, MessageQueue>();
+
 // Telegram
 var telegramToken = configuration["Telegram:Token"] ?? string.Empty;
 
 if (telegramToken != string.Empty)
 {
+    builder.Services.Configure<TelegramBotParameters>(configuration.GetSection("Telegram"));
     builder.Services.AddSingleton<ITelegramBotClient, TelegramBotClient>(x =>
         new TelegramBotClient(telegramToken));
 
-    builder.Services.AddSingleton(new TelegramBotParameters()
-    {
-        ChatId = configuration.GetValue<long>("Telegram:ChatId")
-    });
+    builder.Services.AddSingleton<ITelegramClient, TelegramClient>();
+}
+
+// Smtp
+var smtpServer = configuration["Smtp:Server"] ?? string.Empty;
+
+if (smtpServer != string.Empty)
+{
+    builder.Services.Configure<SmtpParameters>(configuration.GetSection("Smtp"));
+    builder.Services.AddSingleton<ISmtpService, SmtpService>();
 }
 
 // Mongo
@@ -101,13 +113,15 @@ if (ruvdsUri != string.Empty && ruvdsToken != string.Empty)
 }
 
 // Hosted Services
+builder.Services.AddHostedService<Services.Message.Worker>();
+
 if (telegramToken != string.Empty && nightscoutUri != string.Empty)
     builder.Services.AddHostedService<Services.Nightscout.Worker>();
 
 if (telegramToken != string.Empty && ruvdsUri != string.Empty)
     builder.Services.AddHostedService<Services.RuVds.Worker>();
 
-if (!builder.Services.Any(x => x.ServiceType == typeof(IHostedService)))
+if (!builder.Services.Any(x => x.ServiceType == typeof(IHostedService) && x.ImplementationType != typeof(Services.Message.Worker)))
     throw new Exception("Ни один сервис не активирован");
 
 // App

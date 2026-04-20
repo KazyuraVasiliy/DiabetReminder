@@ -8,6 +8,8 @@
 
         public required Users? Users { get; init; }
 
+        public required Channels? Channels { get; init; }
+
         public required Mongo? Mongo { get; init; }
 
         public required Google? Google { get; init; }
@@ -40,6 +42,25 @@
 
     public class Users
     {
+        public string[]? Error { get; init; }
+
+        public string[]? Hypoglycemia { get; init; }
+
+        public string[]? Hyperglycemia { get; init; }
+
+        public string[]? HighGlucose { get; init; }
+
+        public string[]? LowGlucose { get; init; }
+
+        public string[]? Battery { get; init; }
+
+        public string[]? Mongo { get; init; }
+    }
+
+    public class Channels
+    {
+        public string[]? Error { get; init; }
+
         public string[]? Hypoglycemia { get; init; }
 
         public string[]? Hyperglycemia { get; init; }

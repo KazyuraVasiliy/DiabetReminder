@@ -5,7 +5,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly;
-using Telegram.Bot;
+using Services.Message;
+using Services.Message.Models;
 
 namespace Services.RuVds
 {
@@ -13,16 +14,14 @@ namespace Services.RuVds
     {
         private readonly RuVds.Client _ruvdsClient;
         private readonly RuVds.Models.Parameters _ruvdsParameters;
-        private readonly ITelegramBotClient _telegramBotClient;
-        private readonly TelegramBotParameters _telegramBotParameters;
+        private readonly IMessageQueue _messageQueue;
         private readonly ILogger<Worker> _logger;
 
-        public Worker(RuVds.Client ruvdsClient, IOptions<RuVds.Models.Parameters> ruvdsParameters, ITelegramBotClient telegramBotClient, TelegramBotParameters telegramBotParameters, ILogger<Worker> logger)
+        public Worker(RuVds.Client ruvdsClient, IOptions<RuVds.Models.Parameters> ruvdsParameters, IMessageQueue messageQueue, ILogger<Worker> logger)
         {
             _ruvdsClient = ruvdsClient;
             _ruvdsParameters = ruvdsParameters.Value;
-            _telegramBotClient = telegramBotClient;
-            _telegramBotParameters = telegramBotParameters;
+            _messageQueue = messageQueue;
             _logger = logger;
         }
 
@@ -40,7 +39,7 @@ namespace Services.RuVds
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                var message = string.Empty;
+                Message.Models.Message? message = null;
                 var date = DateTime.UtcNow;
 
                 using var _ = _logger.BeginScope(new Dictionary<string, object> 
@@ -71,23 +70,39 @@ namespace Services.RuVds
                         throw new Exception("Не удалось получить информацию о балансе");
 
                     if (date.AddDays(3) >= server.PaidTill)
-                        message = $"Срок оплаты сервера заканчивается {server.PaidTill:dd.MM.yyyy HH:mm} по UTC. Необходимо оплатить: {server.Cost.CostRub}. Баланс: {balance.Amount}";
+                    {
+                        message = new Message.Models.Message()
+                        {
+                            Type = Message.Models.Types.ServerPaid,
+                            Body = $"Срок оплаты сервера заканчивается {server.PaidTill:dd.MM.yyyy HH:mm} по UTC. Необходимо оплатить: {server.Cost.CostRub}. Баланс: {balance.Amount}",
+                            Users = _ruvdsParameters.Users?.Paid,
+                            Channel = EnumService.ConvertToEnumFlag<Channels>(_ruvdsParameters.Channels?.Paid)
+                        };
+                    }
                 }
                 catch (Exception exception)
                 {
                     // Даже на очень редкие запросы срабатывает DDoS-Guard, поэтому ошибка 403 отбрасывается
                     if (!(exception is RestException restException && restException.HttpStatusCode == StatusCodes.Status403Forbidden))
-                        message = exception.Message;
+                    {
+                        message = new Message.Models.Message()
+                        {
+                            Type = Message.Models.Types.Error,
+                            Body = $"Ошибка получения статуса оплаты сервера! {exception.Message}",
+                            Users = _ruvdsParameters.Users?.Error,
+                            Channel = EnumService.ConvertToEnumFlag<Channels>(_ruvdsParameters.Channels?.Error)
+                        };
+                    }
                 }
 
                 try
                 {
-                    if (message != string.Empty)
-                        await _telegramBotClient.SendMessage(_telegramBotParameters.ChatId, message, cancellationToken: cancellationToken);
+                    if (message != null)
+                        await _messageQueue.EnqueueAsync(message);
                 }
                 catch (Exception exception)
                 {
-                    _logger.LogError(exception, message);
+                    _logger.LogError(exception, $"Ошибка отправки сообщения в очередь: {message!.Body}");
                 }
 
                 await Task.Delay(TimeSpan.FromMilliseconds(_ruvdsParameters.Delay.Paid), cancellationToken);
@@ -100,7 +115,7 @@ namespace Services.RuVds
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                var message = string.Empty;
+                Message.Models.Message? message = null;
                 var delay = _ruvdsParameters.Delay.Status;
 
                 using var _ = _logger.BeginScope(new Dictionary<string, object>
@@ -123,24 +138,41 @@ namespace Services.RuVds
                         });
 
                     if (server?.Status != "active")
-                        message = $"Сервер отключён! Текущий статус: {server?.Status ?? "unknown"}";
+                    {
+                        message = new Message.Models.Message()
+                        {
+                            Type = Message.Models.Types.ServerStatus,
+                            Body = $"Сервер отключён! Текущий статус: {server?.Status ?? "unknown"}",
+                            Users = _ruvdsParameters.Users?.Status,
+                            Channel = EnumService.ConvertToEnumFlag<Channels>(_ruvdsParameters.Channels?.Status)
+                        };
+                    }
                 }
                 catch (Exception exception)
                 {
                     // Даже на очень редкие запросы срабатывает DDoS-Guard, поэтому ошибка 403 отбрасывается, а задержка увеличивается
                     if (exception is RestException restException && restException.HttpStatusCode == StatusCodes.Status403Forbidden)
                         delay *= 5;
-                    else message = exception.Message;
+                    else
+                    {
+                        message = new Message.Models.Message()
+                        {
+                            Type = Message.Models.Types.Error,
+                            Body = $"Ошибка получения статуса сервера! {exception.Message}",
+                            Users = _ruvdsParameters.Users?.Error,
+                            Channel = EnumService.ConvertToEnumFlag<Channels>(_ruvdsParameters.Channels?.Error)
+                        };
+                    }
                 }
 
                 try
                 {
-                    if (message != string.Empty)
-                        await _telegramBotClient.SendMessage(_telegramBotParameters.ChatId, message, cancellationToken: cancellationToken);
+                    if (message != null)
+                        await _messageQueue.EnqueueAsync(message);
                 }
                 catch (Exception exception)
                 {
-                    _logger.LogError(exception, message);
+                    _logger.LogError(exception, $"Ошибка отправки сообщения в очередь: {message!.Body}");
                 }
 
                 await Task.Delay(TimeSpan.FromMilliseconds(_ruvdsParameters.Delay.Status), cancellationToken);

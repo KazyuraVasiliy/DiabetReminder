@@ -1,5 +1,4 @@
-﻿using Core.Models;
-using Core.Services;
+﻿using Core.Services;
 using Google.Apis.Calendar.v3;
 using Google.Apis.Calendar.v3.Data;
 using Microsoft.Extensions.Hosting;
@@ -8,7 +7,8 @@ using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using Polly;
-using Telegram.Bot;
+using Services.Message;
+using Services.Message.Models;
 
 namespace Services.Nightscout
 {
@@ -16,18 +16,16 @@ namespace Services.Nightscout
     {
         private readonly Nightscout.Client _nightscoutClient;
         private readonly Nightscout.Models.Parameters _nightscoutParameters;
-        private readonly ITelegramBotClient _telegramBotClient;
-        private readonly TelegramBotParameters _telegramBotParameters;        
+        private readonly IMessageQueue _messageQueue;
         private readonly ILogger<Worker> _logger;
         private readonly IMongoClient? _mongoClient;
         private readonly CalendarService? _calendarService;
 
-        public Worker(Nightscout.Client nightscoutClient, IOptions<Nightscout.Models.Parameters> nightscoutParameters, ITelegramBotClient telegramBotClient, TelegramBotParameters telegramBotParameters, ILogger<Worker> logger, IMongoClient? mongoClient = null, CalendarService? calendarService = null)
+        public Worker(Nightscout.Client nightscoutClient, IOptions<Nightscout.Models.Parameters> nightscoutParameters, IMessageQueue messageQueue, ILogger<Worker> logger, IMongoClient? mongoClient = null, CalendarService? calendarService = null)
         {
             _nightscoutClient = nightscoutClient;
             _nightscoutParameters = nightscoutParameters.Value;
-            _telegramBotClient = telegramBotClient;
-            _telegramBotParameters = telegramBotParameters;
+            _messageQueue = messageQueue;
             _logger = logger;
             _mongoClient = mongoClient;
             _calendarService = calendarService;
@@ -46,11 +44,10 @@ namespace Services.Nightscout
         private async Task GlucoseMonitor(CancellationToken cancellationToken)
         {
             var methodName = ReflectionService.GetMethodName();
-            var coefficient = 0;
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                var message = string.Empty;
+                Message.Models.Message? message = null;
                 var delay = TimeSpan.FromMilliseconds(_nightscoutParameters.Delay.Default);
 
                 using var _ = _logger.BeginScope(new Dictionary<string, object>
@@ -88,42 +85,73 @@ namespace Services.Nightscout
                         throw new Exception("Прошло более 10 минут с последнего измерения глюкозы");
 
                     if (lastEntry.Glucose <= _nightscoutParameters.Glucose.Hypoglycemia)
-                        message = $"Гипогликемия! Глюкоза: {lastEntry.Glucose}\n" + string.Join(", ", _nightscoutParameters.Users?.Hypoglycemia ?? Array.Empty<string>());
+                    {
+                        message = new Message.Models.Message()
+                        {
+                            Type = Message.Models.Types.Hypoglycemia,
+                            Body = $"Гипогликемия! Глюкоза: {lastEntry.Glucose}",
+                            Users = _nightscoutParameters.Users?.Hypoglycemia,
+                            Channel = EnumService.ConvertToEnumFlag<Channels>(_nightscoutParameters.Channels?.Hypoglycemia)
+                        };
+                    }
 
                     else if (lastEntry.Glucose >= _nightscoutParameters.Glucose.Hyperglycemia)
-                        message = $"Гипергликимия! Глюкоза: {lastEntry.Glucose}\n" + string.Join(", ", _nightscoutParameters.Users?.Hyperglycemia ?? Array.Empty<string>());
+                    {
+                        message = new Message.Models.Message()
+                        {
+                            Type = Message.Models.Types.Hyperglycemia,
+                            Body = $"Гипергликимия! Глюкоза: {lastEntry.Glucose}",
+                            Users = _nightscoutParameters.Users?.Hyperglycemia,
+                            Channel = EnumService.ConvertToEnumFlag<Channels>(_nightscoutParameters.Channels?.Hyperglycemia)
+                        };
+                    }
 
                     else if (lastEntry.Glucose <= _nightscoutParameters.Glucose.LowGlucose && delta <= -_nightscoutParameters.Glucose.Delta)
-                        message = $"Резкое падение! Дельта: {delta}; Глюкоза: {lastEntry.Glucose}\n" + string.Join(", ", _nightscoutParameters.Users?.LowGlucose ?? Array.Empty<string>());
+                    {
+                        message = new Message.Models.Message()
+                        {
+                            Type = Message.Models.Types.LowGlucose,
+                            Body = $"Резкое падение! Дельта: {delta}; Глюкоза: {lastEntry.Glucose}",
+                            Users = _nightscoutParameters.Users?.LowGlucose,
+                            Channel = EnumService.ConvertToEnumFlag<Channels>(_nightscoutParameters.Channels?.LowGlucose)
+                        };
+                    }
 
                     else if (lastEntry.Glucose >= _nightscoutParameters.Glucose.HighGlucose && delta >= _nightscoutParameters.Glucose.Delta)
-                        message = $"Резкий рост! Дельта: {delta}; Глюкоза: {lastEntry.Glucose}\n" + string.Join(", ", _nightscoutParameters.Users?.HighGlucose ?? Array.Empty<string>());
-
-                    message = message.TrimEnd('\n');
-
-                    if (message != string.Empty)
                     {
-                        delay = TimeSpan.FromMilliseconds(_nightscoutParameters.Delay.Warning + _nightscoutParameters.Delay.Warning * 0.5 * coefficient);
-
-                        if (lastEntry.Glucose > _nightscoutParameters.Glucose.LowGlucose)
-                            coefficient++;
+                        message = new Message.Models.Message()
+                        {
+                            Type = Message.Models.Types.HighGlucose,
+                            Body = $"Резкий рост! Дельта: {delta}; Глюкоза: {lastEntry.Glucose}",
+                            Users = _nightscoutParameters.Users?.HighGlucose,
+                            Channel = EnumService.ConvertToEnumFlag<Channels>(_nightscoutParameters.Channels?.HighGlucose)
+                        };
                     }
-                    else coefficient = 0;
+
+                    if (message != null)
+                        delay = TimeSpan.FromMilliseconds(_nightscoutParameters.Delay.Warning);
                 }
                 catch (Exception exception)
                 {
-                    message = $"Ошибка получения уровня глюкозы! {exception.Message}";
+                    message = new Message.Models.Message()
+                    {
+                        Type = Message.Models.Types.Error,
+                        Body = $"Ошибка получения уровня глюкозы! {exception.Message}",
+                        Users = _nightscoutParameters.Users?.Error,
+                        Channel = EnumService.ConvertToEnumFlag<Channels>(_nightscoutParameters.Channels?.Error)
+                    };
+
                     delay = TimeSpan.FromMilliseconds(_nightscoutParameters.Delay.Error);
                 }
 
                 try
                 {
-                    if (message != string.Empty)
-                        await _telegramBotClient.SendMessage(_telegramBotParameters.ChatId, message, cancellationToken: cancellationToken);
+                    if (message != null)
+                        await _messageQueue.EnqueueAsync(message);
                 }
                 catch (Exception exception)
                 {
-                    _logger.LogError(exception, message);
+                    _logger.LogError(exception, $"Ошибка отправки сообщения в очередь: {message!.Body}");
                 }
 
                 await Task.Delay(delay, cancellationToken);
@@ -195,8 +223,7 @@ namespace Services.Nightscout
 
                     var newEvent = new Event
                     {
-                        Summary = $"Глюкоза {lastEntry.Glucose} Δ {delta}",
-                        Description = $"Значение получено в {DateTime.Now.AddMinutes(-totalMinutesAgo):HH:mm:ss dd.MM.yy}",
+                        Summary = $"Глюкоза {lastEntry.Glucose} Δ {delta} от {DateTime.Now.AddMinutes(-totalMinutesAgo):HH:mm:ss dd.MM.yy}",
                         ColorId = colorId,
                         Start = new EventDateTime
                         {
@@ -207,7 +234,8 @@ namespace Services.Nightscout
                         {
                             Date = DateTime.Today.AddDays(1).ToString("yyyy-MM-dd"),
                             TimeZone = TimeZoneInfo.Local.ToString()
-                        }
+                        },
+                        Transparency = "transparent"
                     };
 
                     await _calendarService.Events.Insert(newEvent, _nightscoutParameters.Google.CalendarId).ExecuteAsync();
@@ -237,10 +265,10 @@ namespace Services.Nightscout
                 {
                     _logger.LogInformation("MongoClient не инициализирован");
                     return;
-                }    
+                }
 
-                var message = string.Empty;
-                var delay = TimeSpan.FromMilliseconds(_nightscoutParameters.Mongo.Delay);                
+                Message.Models.Message? message = null;
+                var delay = TimeSpan.FromMilliseconds(_nightscoutParameters.Mongo.Delay);
 
                 try
                 {
@@ -270,27 +298,35 @@ namespace Services.Nightscout
                     }
 
                     if (usedSpacePercent >= (_nightscoutParameters.Mongo.WarningPercent ?? 80))
-                        message = $"Размер базы данных превысил допустимое значение: {totalSizeMiB:N2}/{maxDatabaseSizeMib:N2}. Рекомендуется воспользоваться штатным механизмом Nightscout для очистки базы";
-
-                    if (message != string.Empty)
                     {
-                        message += "\n" + string.Join(", ", _nightscoutParameters.Users?.Mongo ?? Array.Empty<string>());
-                        message = message.TrimEnd('\n');
+                        message = new Message.Models.Message()
+                        {
+                            Type = Message.Models.Types.DatabaseSpace,
+                            Body = $"Размер базы данных превысил допустимое значение: {totalSizeMiB:N2}/{maxDatabaseSizeMib:N2}. Рекомендуется воспользоваться штатным механизмом Nightscout для очистки базы",
+                            Users = _nightscoutParameters.Users?.Mongo,
+                            Channel = EnumService.ConvertToEnumFlag<Channels>(_nightscoutParameters.Channels?.Mongo)
+                        };
                     }
                 }
                 catch (Exception exception)
                 {
-                    message = $"Ошибка получения данных MongoDb! {exception.Message}";
+                    message = new Message.Models.Message()
+                    {
+                        Type = Message.Models.Types.Error,
+                        Body = $"Ошибка получения данных MongoDb! {exception.Message}",
+                        Users = _nightscoutParameters.Users?.Error,
+                        Channel = EnumService.ConvertToEnumFlag<Channels>(_nightscoutParameters.Channels?.Error)
+                    };
                 }
 
                 try
                 {
-                    if (message != string.Empty)
-                        await _telegramBotClient.SendMessage(_telegramBotParameters.ChatId, message, cancellationToken: cancellationToken);
+                    if (message != null)
+                        await _messageQueue.EnqueueAsync(message);
                 }
                 catch (Exception exception)
                 {
-                    _logger.LogError(exception, message);
+                    _logger.LogError(exception, $"Ошибка отправки сообщения в очередь: {message!.Body}");
                 }
 
                 await Task.Delay(delay, cancellationToken);
@@ -319,7 +355,7 @@ namespace Services.Nightscout
 
                 foreach (var device in _nightscoutParameters.Battery!.Devices!)
                 {
-                    var message = string.Empty;
+                    Message.Models.Message? message = null;
                     Responses.DeviceStatus? deviceStatus = null;
 
                     try
@@ -351,27 +387,35 @@ namespace Services.Nightscout
                             : deviceStatus.Uploader.Battery;
 
                         if (battery <= _nightscoutParameters.Battery!.WarningPercent)
-                            message = $"Низкий уровень заряда {deviceName}! Уровень заряда: {battery}%";
-
-                        if (message != string.Empty)
                         {
-                            message += "\n" + string.Join(", ", _nightscoutParameters.Users?.Battery ?? Array.Empty<string>());
-                            message = message.TrimEnd('\n');
-                        } 
+                            message = new Message.Models.Message()
+                            {
+                                Type = Message.Models.Types.BatteryLevel,
+                                Body = $"Низкий уровень заряда {deviceName}! Уровень заряда: {battery}%",
+                                Users = _nightscoutParameters.Users?.Battery,
+                                Channel = EnumService.ConvertToEnumFlag<Channels>(_nightscoutParameters.Channels?.Battery)
+                            };
+                        }
                     }
                     catch (Exception exception)
                     {
-                        message = $"Ошибка получения уровня заряда {device}! {exception.Message}";
+                        message = new Message.Models.Message()
+                        {
+                            Type = Message.Models.Types.Error,
+                            Body = $"Ошибка получения уровня заряда {device}! {exception.Message}",
+                            Users = _nightscoutParameters.Users?.Error,
+                            Channel = EnumService.ConvertToEnumFlag<Channels>(_nightscoutParameters.Channels?.Error)
+                        };
                     }
 
                     try
                     {
-                        if (message != string.Empty)
-                            await _telegramBotClient.SendMessage(_telegramBotParameters.ChatId, message, cancellationToken: cancellationToken);
+                        if (message != null)
+                            await _messageQueue.EnqueueAsync(message);
                     }
                     catch (Exception exception)
                     {
-                        _logger.LogError(exception, message);
+                        _logger.LogError(exception, $"Ошибка отправки сообщения в очередь: {message!.Body}");
                     }
                 }
 

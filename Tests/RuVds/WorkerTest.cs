@@ -1,9 +1,9 @@
-﻿using Core.Models;
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
-using Telegram.Bot;
+using Services.Message;
+using Services.Message.Models;
 
 namespace Tests.RuVds
 {
@@ -13,18 +13,38 @@ namespace Tests.RuVds
 
         public static IEnumerable<object?[]> TheoryData()
         {
-            yield return new object?[] { Now.AddMonths(1), "active", "" };
-            yield return new object?[] { Now.AddMonths(1), "blocked", "Сервер отключён! Текущий статус: blocked" };
-            yield return new object?[] { Now.AddDays(1), "active", $"Срок оплаты сервера заканчивается {Now.AddDays(1):dd.MM.yyyy HH:mm} по UTC. Необходимо оплатить: 300. Баланс: 200" };
-            yield return new object?[] { null, "active", "Не удалось получить информацию о сервере" };
+            yield return new object?[] { Now.AddMonths(1), "active", null };
+            yield return new object?[] { Now.AddMonths(1), "blocked", new Message()
+            {
+                Type = Types.ServerStatus,
+                Body = "Сервер отключён! Текущий статус: blocked",
+                Channel = Channels.Email,
+                Users = [ "@User1" ]
+            }};
+            yield return new object?[] { Now.AddDays(1), "active", new Message()
+            {
+                Type = Types.ServerPaid,
+                Body = $"Срок оплаты сервера заканчивается {Now.AddDays(1):dd.MM.yyyy HH:mm} по UTC. Необходимо оплатить: 300. Баланс: 200",
+                Channel = Channels.Telegram,
+                Users = [ "@User2" ]
+            }};
+            yield return new object?[] { null, "active", new Message()
+            {
+                Type = Types.Error,
+                Body = "Ошибка получения статуса оплаты сервера! Не удалось получить информацию о сервере",
+                Channel = Channels.None,
+                Users = null
+            }};
         }
 
         [Theory]
         [MemberData(nameof(TheoryData))]
-        public async void Notifications_Test(DateTime? paidTill, string status, string notification)
+        public async void Notifications_Test(DateTime? paidTill, string status, Message expectedMessage)
         {
             var logger = new Tests.Logger<Services.RuVds.Worker>();
             var cancellationTokenSource = new CancellationTokenSource();
+
+            Message? actualMessage = null;
 
             var ruvdsClient = new Mock<Services.RuVds.Client>(string.Empty, string.Empty);
             var ruvdsParameters = new Services.RuVds.Models.Parameters()
@@ -34,13 +54,19 @@ namespace Tests.RuVds
                 {
                     Paid = 86400000,
                     Status = 1200000
+                },
+                Users = new Services.RuVds.Models.Users()
+                {
+                    Error = null,
+                    Status = ["@User1"],
+                    Paid = ["@User2"]
+                },
+                Channels = new Services.RuVds.Models.Channels()
+                {
+                    Error = null,
+                    Status = ["Email"],
+                    Paid = ["Telegram"]
                 }
-            };
-
-            var telegramBotClient = new Mock<ITelegramBotClient>();
-            var telegramBotParameters = new TelegramBotParameters()
-            {
-                ChatId = 0
             };
 
             var balance = new Services.RuVds.Responses.Balance()
@@ -68,21 +94,23 @@ namespace Tests.RuVds
                 .Setup(x => x.GetServer(It.IsAny<int>(), It.IsAny<CancellationToken>(), It.IsAny<ILogger>()))
                 .ReturnsAsync(server);
 
+            var messageQueue = new Mock<IMessageQueue>();
+            messageQueue
+                .Setup(x => x.EnqueueAsync(It.IsAny<Message>(), It.IsAny<CancellationToken>()))
+                .Callback<Message, CancellationToken>((x, y) => actualMessage = x);
+
             var worker = new Services.RuVds.Worker(
                 ruvdsClient.Object,
                 Options.Create(ruvdsParameters),
-                telegramBotClient.Object,
-                telegramBotParameters,
+                messageQueue.Object,
                 logger);
 
             await worker.StartAsync(cancellationTokenSource.Token);
-            IInvocationList? invocations = null;
 
             int iteration = 2;
             while (iteration > 0)
             {
-                invocations = telegramBotClient.Invocations;
-                if (invocations.Count > 0)
+                if (actualMessage != null)
                     break;
 
                 await Task.Delay(500);
@@ -90,11 +118,7 @@ namespace Tests.RuVds
             }
 
             cancellationTokenSource.Cancel();
-            var message = invocations?.Count > 0
-                ? (invocations![0].Arguments[0] as dynamic).Text as string
-                : string.Empty;
-
-            message.Should().Be(notification);
+            actualMessage.Should().BeEquivalentTo(expectedMessage);
         }
     }
 }

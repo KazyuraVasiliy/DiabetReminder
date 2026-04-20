@@ -10,4 +10,9 @@
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <PackageReference Include="MailKit" Version="4.16.0" />
+	  <PackageReference Include="Telegram.Bot" Version="22.5.1" />
+	</ItemGroup>
+
 </Project>
